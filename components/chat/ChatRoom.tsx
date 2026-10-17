@@ -34,6 +34,7 @@ export default function ChatRoom({ session, userAName, userBName, onPokeChannel 
   const [sending, setSending] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
+  const [liveStatus, setLiveStatus] = useState<"connecting" | "connected" | "reconnecting">("connecting");
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const channelRef = useRef<RealtimeChannel | null>(null);
@@ -41,35 +42,50 @@ export default function ChatRoom({ session, userAName, userBName, onPokeChannel 
   const lastTap = useRef<{ id: string; at: number } | null>(null);
   const myName = session.user.user_metadata?.display_name || userAName;
 
-  useEffect(() => {
-    let active = true;
-    async function loadMessages() {
-      const { data, error: loadError } = await supabase
-        .from("messages")
-        .select("*")
-        .order("created_at", { ascending: false })
-        .limit(100);
-      if (!active) return;
-      if (loadError) setError(`Could not load messages: ${loadError.message}`);
-      else {
-        const loadedMessages = (data as Message[]).reverse();
-        setMessages((current) => {
-          const byId = new Map(loadedMessages.map((message) => [message.id, message]));
-          current.forEach((message) => byId.set(message.id, message));
-          return [...byId.values()].sort((first, second) => first.created_at.localeCompare(second.created_at));
-        });
-        const unreadIds = (data as Message[])
-          .filter((message) => message.sender_id !== session.user.id && !message.is_read)
-          .map((message) => message.id);
-        if (unreadIds.length) {
-          const { error: readError } = await supabase.from("messages").update({ is_read: true }).in("id", unreadIds);
-          if (readError && active) setError(`Could not update read receipts: ${readError.message}`);
-        }
-      }
-      if (active) setLoading(false);
+  const refreshMessages = useCallback(async (markRead = true) => {
+    const { data, error: loadError } = await supabase
+      .from("messages")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .limit(100);
+
+    if (loadError) {
+      setError(`Could not sync messages: ${loadError.message}`);
+      return;
     }
 
-    void loadMessages();
+    const loadedMessages = (data as Message[]).reverse();
+    setMessages((current) => {
+      const byId = new Map(loadedMessages.map((message) => [message.id, message]));
+      current.forEach((message) => byId.set(message.id, message));
+      return [...byId.values()]
+        .sort((first, second) => first.created_at.localeCompare(second.created_at))
+        .slice(-100);
+    });
+
+    if (markRead) {
+      const unreadIds = loadedMessages
+        .filter((message) => message.sender_id !== session.user.id && !message.is_read)
+        .map((message) => message.id);
+      if (unreadIds.length) {
+        const { error: readError } = await supabase.from("messages").update({ is_read: true }).in("id", unreadIds);
+        if (readError) setError(`Could not update read receipts: ${readError.message}`);
+      }
+    }
+    setError((current) => current.startsWith("Could not sync messages:") ? "" : current);
+  }, [session.user.id, supabase]);
+
+  useEffect(() => {
+    let active = true;
+    const sync = () => {
+      void refreshMessages(document.visibilityState === "visible");
+    };
+    const interval = window.setInterval(sync, 12_000);
+    document.addEventListener("visibilitychange", sync);
+    window.addEventListener("focus", sync);
+    void refreshMessages().finally(() => {
+      if (active) setLoading(false);
+    });
 
     const channel = supabase.channel("couple-room", {
       config: { presence: { key: session.user.id } }
@@ -80,7 +96,9 @@ export default function ChatRoom({ session, userAName, userBName, onPokeChannel 
       .on("postgres_changes", { event: "*", schema: "public", table: "messages" }, (payload) => {
         const row = payload.new as Message;
         if (payload.eventType === "INSERT") {
-          setMessages((current) => current.some((message) => message.id === row.id) ? current : [...current, row]);
+          setMessages((current) => current.some((message) => message.id === row.id)
+            ? current.map((message) => message.id === row.id ? row : message)
+            : [...current, row].sort((first, second) => first.created_at.localeCompare(second.created_at)).slice(-100));
           if (row.sender_id !== session.user.id) playSoftSound("pop");
           if (row.sender_id !== session.user.id && !row.is_read) {
             void supabase.from("messages").update({ is_read: true }).eq("id", row.id).then(({ error: readError }) => {
@@ -105,6 +123,9 @@ export default function ChatRoom({ session, userAName, userBName, onPokeChannel 
       })
       .subscribe(async (status) => {
         if (status === "SUBSCRIBED") {
+          setLiveStatus("connected");
+          setError((current) => current.startsWith("Live chat disconnected:") ? "" : current);
+          void refreshMessages(document.visibilityState === "visible");
           const presence: PresenceState = {
             user_id: session.user.id,
             name: myName,
@@ -114,17 +135,23 @@ export default function ChatRoom({ session, userAName, userBName, onPokeChannel 
           const trackStatus = await channel.track(presence);
           if (trackStatus !== "ok") setError(`Presence unavailable: ${trackStatus}`);
         } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
-          setError("Live chat disconnected. Check your Supabase Realtime settings and connection.");
+          setLiveStatus("reconnecting");
+          setError("Live chat disconnected: reconnecting. Messages will sync automatically while you’re here.");
+        } else if (status === "CLOSED") {
+          setLiveStatus("reconnecting");
         }
       });
 
     return () => {
       active = false;
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", sync);
+      window.removeEventListener("focus", sync);
       if (typingTimer.current) clearTimeout(typingTimer.current);
       onPokeChannel(null);
       void supabase.removeChannel(channel);
     };
-  }, [myName, onPokeChannel, session.user.id, supabase]);
+  }, [myName, onPokeChannel, refreshMessages, session.user.id, supabase]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -134,13 +161,19 @@ export default function ChatRoom({ session, userAName, userBName, onPokeChannel 
     if (!text.trim() && !imageUrl) return;
     setSending(true);
     setError("");
-    const { error: insertError } = await supabase.from("messages").insert({
+    const { data: insertedMessage, error: insertError } = await supabase.from("messages").insert({
       sender_id: session.user.id,
       text: text.trim() || null,
       image_url: imageUrl
-    });
+    }).select("*").single();
     if (insertError) setError(`Message not sent: ${insertError.message}`);
-    else setDraft("");
+    else {
+      const message = insertedMessage as Message;
+      setMessages((current) => current.some((item) => item.id === message.id)
+        ? current
+        : [...current, message].sort((first, second) => first.created_at.localeCompare(second.created_at)).slice(-100));
+      setDraft("");
+    }
     setSending(false);
     await channelRef.current?.track({
       user_id: session.user.id,
@@ -224,7 +257,7 @@ export default function ChatRoom({ session, userAName, userBName, onPokeChannel 
           </div>
           <div>
             <h2 className="serif text-xl">Our messages</h2>
-            <p className="text-xs text-ink/55">{onlineUsers.length ? "Here with you now" : "Just between us"}</p>
+            <p className="text-xs text-ink/55">{liveStatus === "connected" ? (onlineUsers.length ? "Here with you now" : "Just between us") : liveStatus === "connecting" ? "Connecting…" : "Reconnecting · syncing messages"}</p>
           </div>
         </div>
         <span className="rounded-full bg-[#f8f3ee] px-3 py-1.5 text-[11px] font-semibold text-plum">
