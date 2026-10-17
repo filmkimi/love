@@ -7,9 +7,17 @@ import { getSupabaseBrowserClient } from "@/lib/supabaseClient";
 
 type ProfileId = "A" | "B";
 const profiles: { id: ProfileId; name: string }[] = [
-  { id: "A", name: process.env.NEXT_PUBLIC_USER_A_NAME || "You" },
-  { id: "B", name: process.env.NEXT_PUBLIC_USER_B_NAME || "Your person" }
+  { id: "A", name: process.env.NEXT_PUBLIC_USER_A_NAME || "คุณ" },
+  { id: "B", name: process.env.NEXT_PUBLIC_USER_B_NAME || "คนรักของคุณ" }
 ];
+
+function translateLoginError(message: string) {
+  if (/missing|setting|environment|setup|supabase/i.test(message)) return "การตั้งค่าระบบยังไม่ครบ กรุณาตรวจสอบค่าการเชื่อมต่อ Supabase";
+  if (/too many|rate limit|wait/i.test(message)) return "ลองใส่รหัสหลายครั้งเกินไป กรุณารอสักครู่แล้วลองใหม่";
+  if (/not enabled|not invited|couple space/i.test(message)) return "โปรไฟล์นี้ยังไม่ได้รับอนุญาตให้เข้าใช้งาน กรุณาตรวจสอบการตั้งค่าสมาชิก";
+  if (/pin|password|credentials|invalid/i.test(message)) return "รหัสไม่ถูกต้อง ลองใหม่อีกครั้งนะ";
+  return "เข้าสู่ระบบไม่สำเร็จ กรุณาลองอีกครั้ง";
+}
 
 export default function AuthGate({ children }: { children: (session: Session) => React.ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
@@ -27,7 +35,7 @@ export default function AuthGate({ children }: { children: (session: Session) =>
       const supabase = getSupabaseBrowserClient();
       supabase.auth.getSession().then(({ data, error: sessionError }) => {
         if (!alive) return;
-        if (sessionError) setError(sessionError.message);
+        if (sessionError) setError("ตรวจสอบเซสชันไม่สำเร็จ กรุณาเข้าสู่ระบบอีกครั้ง");
         setSession(data.session);
         setLoading(false);
       });
@@ -71,9 +79,9 @@ export default function AuthGate({ children }: { children: (session: Session) =>
       };
       if (!response.ok || !result.access_token || !result.refresh_token) {
         const missing = result.missingSettings?.length
-          ? ` Missing settings: ${result.missingSettings.join(", ")}.`
+          ? ` (ค่าที่ขาด: ${result.missingSettings.join(", ")})`
           : "";
-        setError(`${result.error || "That PIN didn’t work. Try again."}${missing}`);
+        setError(`${translateLoginError(result.error || "")}${missing}`);
         pinRef.current = "";
         setPin("");
         return;
@@ -84,12 +92,12 @@ export default function AuthGate({ children }: { children: (session: Session) =>
         refresh_token: result.refresh_token
       });
       if (sessionError) {
-        setError("Couldn’t start your private session. Please try again.");
+        setError("เริ่มเซสชันส่วนตัวไม่สำเร็จ กรุณาลองอีกครั้ง");
         pinRef.current = "";
         setPin("");
       }
     } catch {
-      setError("Couldn’t connect just now. Please try again.");
+      setError("เชื่อมต่อไม่สำเร็จ กรุณาลองอีกครั้ง");
       pinRef.current = "";
       setPin("");
     } finally {
@@ -123,19 +131,19 @@ export default function AuthGate({ children }: { children: (session: Session) =>
       <div className="absolute bottom-[13%] right-[10%] rotate-12 text-2xl text-sage/70">✿</div>
       <section className="w-full max-w-[420px] rounded-[2rem] border border-white/80 bg-white/85 p-7 shadow-soft backdrop-blur sm:p-10">
         <div className="mx-auto mb-6 grid h-14 w-14 place-items-center rounded-2xl bg-blush text-plum"><Heart fill="currentColor" size={25} /></div>
-        <p className="mb-2 text-center text-xs font-bold uppercase tracking-[0.24em] text-plum/70">Just us two</p>
-        <h1 className="serif text-center text-4xl text-ink">Our little world</h1>
+        <p className="mb-2 text-center text-xs font-bold uppercase tracking-[0.24em] text-plum/70">พื้นที่ของเราสองคน</p>
+        <h1 className="serif text-center text-4xl text-ink">โลกใบเล็กของเรา</h1>
         <p className="mx-auto mb-7 mt-3 max-w-xs text-center text-sm leading-6 text-ink/60">
-          {profile ? `A little PIN, and you’re home, ${profiles.find((item) => item.id === profile)?.name}.` : "Choose your place in our little world."}
+          {profile ? `ใส่รหัสอีกนิดเดียว แล้วกลับบ้านของเรากันนะ ${profiles.find((item) => item.id === profile)?.name}` : "เลือกโปรไฟล์ของคุณเพื่อเข้าสู่โลกใบเล็กของเรา"}
         </p>
 
         {!configured ? (
           <div className="rounded-2xl bg-amber-50 p-4 text-sm leading-6 text-amber-900">
-            Add the Supabase project URL and anon key to <code>.env.local</code>, then restart the dev server.
+            เพิ่ม URL ของโปรเจกต์และ anon key ของ Supabase ในไฟล์ <code>.env.local</code> แล้วเริ่มเซิร์ฟเวอร์ใหม่
           </div>
         ) : (
           <>
-            <div aria-label="Choose your profile" className="grid grid-cols-2 gap-3">
+            <div aria-label="เลือกโปรไฟล์" className="grid grid-cols-2 gap-3">
               {profiles.map((item, index) => (
                 <button
                   aria-pressed={profile === item.id}
@@ -155,7 +163,7 @@ export default function AuthGate({ children }: { children: (session: Session) =>
 
             {profile && (
               <form className="mt-6" onSubmit={(event) => { event.preventDefault(); void unlock(); }}>
-                <label className="sr-only" htmlFor="profile-pin">Six-digit PIN</label>
+                <label className="sr-only" htmlFor="profile-pin">รหัส PIN 6 หลัก</label>
                 <input
                   autoComplete="one-time-code"
                   className="mb-4 w-full rounded-xl border border-rose-100 bg-[#fffdfb] px-4 py-3 text-center text-lg tracking-[0.45em] outline-none focus:border-plum/50"
@@ -168,11 +176,11 @@ export default function AuthGate({ children }: { children: (session: Session) =>
                   type="password"
                   value={pin}
                 />
-                <div aria-label="PIN keypad" className="mx-auto grid max-w-[250px] grid-cols-3 gap-2">
+                <div aria-label="แป้นตัวเลข PIN" className="mx-auto grid max-w-[250px] grid-cols-3 gap-2">
                   {["1", "2", "3", "4", "5", "6", "7", "8", "9", "", "0", "delete"].map((digit, index) => digit === "" ? (
                     <span aria-hidden="true" key={`empty-${index}`} />
                   ) : digit === "delete" ? (
-                    <button aria-label="Delete last digit" className="grid h-12 place-items-center rounded-xl text-ink/60 hover:bg-blush" key={digit} onClick={() => handlePinInput(pin.slice(0, -1))} type="button"><Delete size={19} /></button>
+                    <button aria-label="ลบตัวเลขตัวสุดท้าย" className="grid h-12 place-items-center rounded-xl text-ink/60 hover:bg-blush" key={digit} onClick={() => handlePinInput(pin.slice(0, -1))} type="button"><Delete size={19} /></button>
                   ) : (
                     <button className="h-12 rounded-xl bg-[#faf5f3] text-lg font-semibold text-ink transition hover:bg-blush active:scale-95" key={digit} onClick={() => addDigit(digit)} type="button">{digit}</button>
                   ))}
@@ -184,14 +192,14 @@ export default function AuthGate({ children }: { children: (session: Session) =>
                   type="submit"
                 >
                   {submitting ? <LoaderCircle className="animate-spin" size={18} /> : <LockKeyhole size={17} />}
-                  {submitting ? "Opening your world…" : "Unlock our world"}
+                  {submitting ? "กำลังเปิดโลกของเรา…" : "เข้าสู่โลกของเรา"}
                 </button>
-                <button className="mt-3 w-full py-2 text-sm text-ink/50 hover:text-plum" onClick={() => { setProfile(null); clearPin(); }} type="button">Choose another profile</button>
+                <button className="mt-3 w-full py-2 text-sm text-ink/50 hover:text-plum" onClick={() => { setProfile(null); clearPin(); }} type="button">เลือกโปรไฟล์อื่น</button>
               </form>
             )}
           </>
         )}
-        <p className="mt-6 text-center text-xs leading-5 text-ink/45">Only the two profiles invited into your little world can enter.</p>
+        <p className="mt-6 text-center text-xs leading-5 text-ink/45">มีเพียงสองโปรไฟล์ที่ได้รับอนุญาตเท่านั้นที่เข้าใช้งานได้</p>
       </section>
     </main>
   );

@@ -32,29 +32,40 @@ export default function PokeButton({ session, channel, partnerName }: PokeButton
         payload: { from: session.user.id, at: new Date().toISOString() }
       });
       if (status !== "ok") {
-        setFeedback("Couldn’t send your little hello. Check your connection.");
+        setFeedback("ส่งความคิดถึงไม่สำเร็จ ลองตรวจสอบการเชื่อมต่อแล้วลองอีกครั้งนะ");
         return;
       }
     } else {
-      setFeedback("Connecting to your shared space… try again in a moment.");
+      setFeedback("กำลังเชื่อมต่อพื้นที่ของเรา ลองอีกครั้งในอีกสักครู่นะ");
       return;
     }
 
     playSoftSound("chime");
 
-    setFeedback(`A little love is on its way to ${partnerName} 💌`);
+    setFeedback(`ส่งความคิดถึงไปหา${partnerName}แล้วนะ 💌`);
     const { data: sessionData } = await getSupabaseBrowserClient().auth.getSession();
     if (!sessionData.session) return;
+    try {
+      const pushResponse = await fetch("/api/push/poke", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${sessionData.session.access_token}` }
+      });
+      if (!pushResponse.ok) {
+        console.info("ส่งการแจ้งเตือนคิดถึงผ่าน Web Push ไม่สำเร็จ:", pushResponse.status);
+      }
+    } catch (error) {
+      console.info("ไม่สามารถเชื่อมต่อบริการ Web Push ได้:", error);
+    }
     try {
       const response = await fetch("/api/notify", {
         method: "POST",
         headers: { Authorization: `Bearer ${sessionData.session.access_token}` }
       });
       if (!response.ok && response.status !== 503) {
-        console.info("Optional partner notification could not be sent:", response.status);
+        console.info("ส่งการแจ้งเตือนเสริมถึงคนรักไม่สำเร็จ:", response.status);
       }
     } catch (error) {
-      console.info("Optional partner notification endpoint is unavailable:", error);
+      console.info("ไม่สามารถเชื่อมต่อบริการแจ้งเตือนเสริมได้:", error);
     }
   }
 
@@ -80,7 +91,7 @@ export default function PokeButton({ session, channel, partnerName }: PokeButton
         type="button"
       >
         <Heart className="fill-[#e69aab] text-[#e69aab]" size={20} />
-        <span>คิดถึงนะ · Miss you</span>
+        <span>คิดถึงนะ</span>
       </motion.button>
       {feedback && <p aria-live="polite" className="mt-2 text-center text-xs text-plum/75">{feedback}</p>}
     </div>

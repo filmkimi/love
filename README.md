@@ -27,12 +27,19 @@ Choose a profile and enter its six-digit PIN to establish a normal Supabase Auth
 - `/memories` private timeline with dated photos, mood tags, and per-partner heart reactions
 - Private `chat-media` and `couple-memories` Storage buckets; images load as authenticated downloads and local object URLs (not shareable bearer links)
 - Realtime “Miss you” broadcast with gentle browser-generated sounds
-- PWA manifest and service-worker notification display/click scaffolding in `public/sw.js`
+- PWA Web Push notifications for incoming messages and “Miss you” pokes, with device-level opt-in
 - Authenticated LINE Messaging API fallback at `POST /api/notify`
 
 Run the complete schema script again when upgrading an existing project or changing the PIN limiter function. It changes `chat-media` from public to private; previous public image URLs stop working as public links, while existing message records that contain the old Supabase public URL are parsed to their object path and downloaded only through the authenticated client.
 
-To enable the LINE fallback, set `LINE_CHANNEL_ACCESS_TOKEN` and `LINE_USER_ID` in the server environment. The browser push worker can display pushed notifications, but sending Web Push requires a push provider/VAPID setup; OneSignal can be added at that integration point. On iOS, web push is available only for an installed home-screen web app on supported versions.
+### Web Push notifications
+
+1. Generate a VAPID key pair with `npx web-push generate-vapid-keys`. Set its public key as `NEXT_PUBLIC_VAPID_PUBLIC_KEY`; keep the private key server-only as `VAPID_PRIVATE_KEY`. Also set `VAPID_SUBJECT` (for example, `mailto:you@example.com`) and a long random `PUSH_WEBHOOK_SECRET`. Add these values to local and Vercel environments.
+2. Run `supabase/schema.sql` again to create the private `push_subscriptions` table.
+3. In Supabase **Database → Webhooks**, create a webhook for `public.messages`, event `INSERT`, method `POST`, pointing to `https://<your-domain>/api/push/webhook`. Add the request header `x-push-webhook-secret` with the exact `PUSH_WEBHOOK_SECRET` value. The webhook only sends a generic notification and does not include message text.
+4. Deploy over HTTPS, install/open the PWA on each device, sign in, and tap **เปิดแจ้งเตือน**. Push permission must be granted on each device. On iPhone/iPad, add the website to the Home Screen first; Web Push requires iOS/iPadOS 16.4 or later.
+
+The app does not send push notifications for every keystroke. Typing status stays live in an open chat; a push is sent for each newly inserted message and each “คิดถึงนะ” poke. Notifications are suppressed while the app is focused. To enable the LINE fallback, set `LINE_CHANNEL_ACCESS_TOKEN` and `LINE_USER_ID` in the server environment.
 
 ## Deploy
 

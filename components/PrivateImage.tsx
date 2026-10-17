@@ -67,7 +67,7 @@ export default function PrivateImage({ bucket, reference, alt, className }: Priv
         // eslint-disable-next-line @next/next/no-img-element
         <img alt={alt} className="h-full w-full object-cover" loading="lazy" src={objectUrl} />
       ) : (
-        <span className="grid h-full w-full place-items-center text-plum/45">
+        <span aria-label={failed ? "โหลดรูปภาพไม่สำเร็จ" : "กำลังโหลดรูปภาพ"} className="grid h-full w-full place-items-center text-plum/45" role="img">
           {failed ? <ImageOff size={22} /> : <LoaderCircle className="animate-spin" size={20} />}
         </span>
       )}

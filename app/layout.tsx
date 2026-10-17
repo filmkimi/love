@@ -6,13 +6,13 @@ const bodyFont = DM_Sans({ subsets: ["latin"], variable: "--font-body" });
 const displayFont = Playfair_Display({ subsets: ["latin"], variable: "--font-display" });
 
 export const metadata: Metadata = {
-  title: "Our Little World",
-  description: "A little place for the two of us.",
-  applicationName: "Our Little World",
+  title: "โลกใบเล็กของเรา",
+  description: "พื้นที่เล็ก ๆ สำหรับเราสองคน",
+  applicationName: "โลกใบเล็กของเรา",
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
-    title: "Our World"
+    title: "โลกของเรา"
   },
   formatDetection: { telephone: false },
   icons: { icon: "/icon.svg", apple: "/icon.svg" },
@@ -29,7 +29,7 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en">
+    <html lang="th">
       <body className={`${bodyFont.variable} ${displayFont.variable}`}>{children}</body>
     </html>
   );

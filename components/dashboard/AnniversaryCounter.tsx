@@ -22,7 +22,7 @@ function nextAnniversary(start: Date, today: Date) {
 export default function AnniversaryCounter({ startDate }: { startDate: string }) {
   const start = new Date(`${startDate}T00:00:00`);
   if (Number.isNaN(start.getTime())) {
-    return <p className="rounded-2xl bg-amber-50 p-4 text-sm text-amber-900">Set a valid NEXT_PUBLIC_ANNIVERSARY_DATE (YYYY-MM-DD).</p>;
+    return <p className="rounded-2xl bg-amber-50 p-4 text-sm text-amber-900">กรุณาตั้งค่าวันครบรอบให้ถูกต้องในรูปแบบ ปี-เดือน-วัน</p>;
   }
   const today = new Date();
   const together = Math.max(0, daysBetween(start, today));
@@ -40,16 +40,16 @@ export default function AnniversaryCounter({ startDate }: { startDate: string })
         <div>
           <div className="mb-5 flex items-center gap-2 text-sm text-white/75">
             <CalendarHeart size={17} />
-            <span>Our favorite little number</span>
+            <span>ตัวเลขที่เรารักที่สุด</span>
           </div>
-          <p className="serif text-5xl leading-none sm:text-6xl">D+{together.toLocaleString()}</p>
-          <p className="mt-3 text-sm text-white/75">days of choosing each other</p>
+          <p className="serif text-5xl leading-none sm:text-6xl">วัน +{together.toLocaleString("th-TH")}</p>
+          <p className="mt-3 text-sm text-white/75">วันที่เราเลือกดูแลกันและกัน</p>
         </div>
         <Sparkles className="mt-1 text-[#f4d5c9]" size={23} />
       </div>
       <div className="relative mt-7 flex items-center justify-between border-t border-white/15 pt-4 text-xs">
-        <span className="text-white/65">Next anniversary</span>
-        <span className="font-semibold">{next.days === 0 ? "Today! ✨" : `In ${next.days} days`}</span>
+        <span className="text-white/65">วันครบรอบครั้งถัดไป</span>
+        <span className="font-semibold">{next.days === 0 ? "วันนี้เลย! ✨" : `อีก ${next.days} วัน`}</span>
       </div>
     </motion.section>
   );

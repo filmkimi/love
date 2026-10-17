@@ -21,7 +21,7 @@ type PresenceState = { user_id: string; name: string; isTyping: boolean; online_
 const HEART = "❤️";
 
 function formatTime(date: string) {
-  return new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(new Date(date));
+  return new Intl.DateTimeFormat("th-TH", { hour: "numeric", minute: "2-digit" }).format(new Date(date));
 }
 
 function sameMessage(first: Message, second: Message) {
@@ -69,7 +69,8 @@ export default function ChatRoom({ session, userAName, userBName, onPokeChannel 
       .limit(100);
 
     if (loadError) {
-      setError(`Could not sync messages: ${loadError.message}`);
+      console.error("ซิงก์ข้อความไม่สำเร็จ:", loadError.message);
+      setError("ซิงก์ข้อความไม่สำเร็จ กรุณาตรวจสอบการเชื่อมต่อ");
       return;
     }
 
@@ -98,10 +99,13 @@ export default function ChatRoom({ session, userAName, userBName, onPokeChannel 
         .map((message) => message.id);
       if (unreadIds.length) {
         const { error: readError } = await supabase.from("messages").update({ is_read: true }).in("id", unreadIds);
-        if (readError) setError(`Could not update read receipts: ${readError.message}`);
+        if (readError) {
+          console.error("อัปเดตสถานะการอ่านข้อความไม่สำเร็จ:", readError.message);
+          setError("อัปเดตสถานะการอ่านข้อความไม่สำเร็จ กรุณาลองอีกครั้ง");
+        }
       }
     }
-    setError((current) => current.startsWith("Could not sync messages:") ? "" : current);
+    setError((current) => current.startsWith("ซิงก์ข้อความไม่สำเร็จ:") ? "" : current);
   }, [session.user.id, supabase]);
 
   useEffect(() => {
@@ -132,7 +136,10 @@ export default function ChatRoom({ session, userAName, userBName, onPokeChannel 
           if (row.sender_id !== session.user.id) playSoftSound("pop");
           if (row.sender_id !== session.user.id && !row.is_read) {
             void supabase.from("messages").update({ is_read: true }).eq("id", row.id).then(({ error: readError }) => {
-              if (readError) setError(`Could not update read receipt: ${readError.message}`);
+              if (readError) {
+                console.error("อัปเดตสถานะการอ่านข้อความไม่สำเร็จ:", readError.message);
+                setError("อัปเดตสถานะการอ่านข้อความไม่สำเร็จ กรุณาลองอีกครั้ง");
+              }
             });
           }
         } else if (payload.eventType === "UPDATE") {
@@ -154,7 +161,7 @@ export default function ChatRoom({ session, userAName, userBName, onPokeChannel 
       .subscribe(async (status) => {
         if (status === "SUBSCRIBED") {
           setLiveStatus("connected");
-          setError((current) => current.startsWith("Live chat disconnected:") ? "" : current);
+          setError((current) => current.startsWith("การเชื่อมต่อแชตขาดหาย:") ? "" : current);
           void refreshMessages(document.visibilityState === "visible");
           const presence: PresenceState = {
             user_id: session.user.id,
@@ -163,10 +170,13 @@ export default function ChatRoom({ session, userAName, userBName, onPokeChannel 
             online_at: new Date().toISOString()
           };
           const trackStatus = await channel.track(presence);
-          if (trackStatus !== "ok") setError(`Presence unavailable: ${trackStatus}`);
+          if (trackStatus !== "ok") {
+            console.error("ไม่สามารถอัปเดตสถานะออนไลน์ได้:", trackStatus);
+            setError("ไม่สามารถอัปเดตสถานะออนไลน์ได้ กรุณาตรวจสอบการเชื่อมต่อ");
+          }
         } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
           setLiveStatus("reconnecting");
-          setError("Live chat disconnected: reconnecting. Messages will sync automatically while you’re here.");
+          setError("การเชื่อมต่อแชตขาดหาย กำลังเชื่อมต่อใหม่และจะซิงก์ข้อความให้อัตโนมัติ");
         } else if (status === "CLOSED") {
           setLiveStatus("reconnecting");
         }
@@ -261,7 +271,8 @@ export default function ChatRoom({ session, userAName, userBName, onPokeChannel 
       if (insertError) {
         setMessages((current) => current.filter((message) => message.id !== messageId));
         setDraft((current) => current || messageText);
-        setError(`Message not sent: ${insertError.message}`);
+        console.error("ส่งข้อความไม่สำเร็จ:", insertError.message);
+        setError("ส่งข้อความไม่สำเร็จ กรุณาลองอีกครั้ง");
         return;
       }
       const message = insertedMessage as Message;
@@ -270,7 +281,8 @@ export default function ChatRoom({ session, userAName, userBName, onPokeChannel 
     } catch (error) {
       setMessages((current) => current.filter((message) => message.id !== messageId));
       setDraft((current) => current || messageText);
-      setError(`Message not sent: ${error instanceof Error ? error.message : "Connection failed."}`);
+      console.error("ส่งข้อความไม่สำเร็จ:", error);
+      setError("ส่งข้อความไม่สำเร็จ กรุณาตรวจสอบการเชื่อมต่อ");
     } finally {
       setPendingMessages((count) => Math.max(0, count - 1));
     }
@@ -336,11 +348,11 @@ export default function ChatRoom({ session, userAName, userBName, onPokeChannel 
   async function uploadImage(file: File | undefined) {
     if (!file) return;
     if (!file.type.startsWith("image/")) {
-      setError("Choose an image file to share.");
+      setError("กรุณาเลือกไฟล์รูปภาพที่ต้องการส่ง");
       return;
     }
     if (file.size > 8 * 1024 * 1024) {
-      setError("Images must be smaller than 8 MB.");
+      setError("รูปภาพต้องมีขนาดไม่เกิน 8 MB");
       return;
     }
     setUploading(true);
@@ -353,7 +365,8 @@ export default function ChatRoom({ session, userAName, userBName, onPokeChannel 
       contentType: file.type
     });
     if (uploadError) {
-      setError(`Image upload failed: ${uploadError.message}`);
+      console.error("อัปโหลดรูปภาพไม่สำเร็จ:", uploadError.message);
+      setError("อัปโหลดรูปภาพไม่สำเร็จ กรุณาลองอีกครั้ง");
     } else {
       await sendMessage("", `chat-media/${data.path}`);
     }
@@ -365,7 +378,10 @@ export default function ChatRoom({ session, userAName, userBName, onPokeChannel 
       .from("messages")
       .update({ reaction: message.reaction === HEART ? null : HEART })
       .eq("id", message.id);
-    if (updateError) setError(`Could not add reaction: ${updateError.message}`);
+    if (updateError) {
+      console.error("เพิ่มหัวใจไม่สำเร็จ:", updateError.message);
+      setError("เพิ่มหัวใจไม่สำเร็จ กรุณาลองอีกครั้ง");
+    }
   }
 
   function tapMessage(message: Message) {
@@ -386,16 +402,16 @@ export default function ChatRoom({ session, userAName, userBName, onPokeChannel 
             <span className={`absolute bottom-0 right-0 h-3 w-3 rounded-full border-2 border-white ${onlineUsers.length ? "bg-emerald-400" : "bg-gray-300"}`} />
           </div>
           <div>
-            <h2 className="serif text-xl">Our messages</h2>
-            <p className="text-xs text-ink/55">{liveStatus === "connected" ? (onlineUsers.length ? "Here with you now" : "Just between us") : liveStatus === "connecting" ? "Connecting…" : "Reconnecting · syncing messages"}</p>
+            <h2 className="serif text-xl">ข้อความของเรา</h2>
+            <p className="text-xs text-ink/55">{liveStatus === "connected" ? (onlineUsers.length ? "อยู่คุยด้วยกันตรงนี้นะ" : "พื้นที่ส่วนตัวของเราสองคน") : liveStatus === "connecting" ? "กำลังเชื่อมต่อ…" : "กำลังเชื่อมต่อใหม่ · ซิงก์ข้อความ"}</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
           <span className="rounded-full bg-[#f8f3ee] px-3 py-1.5 text-[11px] font-semibold text-plum">
-            {onlineUsers.length ? "Active now" : userBName}
+            {onlineUsers.length ? "ออนไลน์อยู่" : userBName}
           </span>
           {mobileFocused && (
-            <button aria-label="Close full-screen chat" className="grid h-9 w-9 place-items-center rounded-full bg-[#f8f3ee] text-plum md:hidden" onClick={() => setMobileFocused(false)} type="button">
+            <button aria-label="ปิดหน้าแชตเต็มจอ" className="grid h-9 w-9 place-items-center rounded-full bg-[#f8f3ee] text-plum md:hidden" onClick={() => setMobileFocused(false)} type="button">
               <X size={18} />
             </button>
           )}
@@ -410,11 +426,11 @@ export default function ChatRoom({ session, userAName, userBName, onPokeChannel 
         }}
         ref={scrollContainerRef}
       >
-        <p className="mx-auto rounded-full bg-white/80 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.17em] text-ink/40">A little space for us</p>
+        <p className="mx-auto rounded-full bg-white/80 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.17em] text-ink/40">พื้นที่เล็ก ๆ ของเราสองคน</p>
         {loading && <LoaderCircle className="mx-auto mt-16 animate-spin text-plum/70" />}
         {!loading && messages.length === 0 && (
           <div className="mx-auto my-auto max-w-[220px] text-center text-sm leading-6 text-ink/50">
-            Your story starts here. Send the first little hello ✨
+            เรื่องราวของเราเริ่มตรงนี้ ส่งข้อความทักทายกันเลย ✨
           </div>
         )}
         <AnimatePresence initial={false}>
@@ -432,11 +448,11 @@ export default function ChatRoom({ session, userAName, userBName, onPokeChannel 
                   onClick={() => tapMessage(message)}
                   onDoubleClick={() => void reactToMessage(message)}
                 >
-                  {message.image_url && <PrivateImage alt="Shared in your chat" bucket="chat-media" className="mb-2 aspect-video w-full overflow-hidden rounded-xl" reference={message.image_url} />}
+                  {message.image_url && <PrivateImage alt="รูปภาพที่ส่งในแชต" bucket="chat-media" className="mb-2 aspect-video w-full overflow-hidden rounded-xl" reference={message.image_url} />}
                   {message.text && <p className="whitespace-pre-wrap break-words leading-5">{message.text}</p>}
                   <div className={`mt-1 flex items-center justify-end gap-1 text-[10px] ${mine ? "text-white/65" : "text-ink/40"}`}>
                     <time dateTime={message.created_at}>{formatTime(message.created_at)}</time>
-                    {mine && (message.is_read ? <CheckCheck size={13} /> : <Check size={13} />)}
+                    {mine && (message.is_read ? <CheckCheck aria-label="อ่านแล้ว" size={13} /> : <Check aria-label="ส่งแล้ว" size={13} />)}
                   </div>
                   {message.reaction && (
                     <span className={`absolute -bottom-3 ${mine ? "left-2" : "right-2"} grid h-6 min-w-6 place-items-center rounded-full border border-rose-100 bg-white px-1 text-xs shadow-sm`}>
@@ -455,7 +471,7 @@ export default function ChatRoom({ session, userAName, userBName, onPokeChannel 
               <i className="h-1.5 w-1.5 animate-bounce rounded-full bg-plum/50 [animation-delay:-0.1s]" />
               <i className="h-1.5 w-1.5 animate-bounce rounded-full bg-plum/50" />
             </span>
-            {typingUsers[0]} is typing
+            {typingUsers[0]} กำลังพิมพ์
           </div>
         )}
       </div>
@@ -468,7 +484,7 @@ export default function ChatRoom({ session, userAName, userBName, onPokeChannel 
           void sendMessage(draft);
         }}
       >
-        <label className="grid h-10 w-10 shrink-0 cursor-pointer place-items-center rounded-full text-plum/75 transition hover:bg-blush" title="Share an image">
+        <label className="grid h-10 w-10 shrink-0 cursor-pointer place-items-center rounded-full text-plum/75 transition hover:bg-blush" title="ส่งรูปภาพ">
           {uploading ? <LoaderCircle className="animate-spin" size={18} /> : <ImagePlus size={19} />}
           <input accept="image/*" className="sr-only" disabled={uploading} onChange={(event) => {
             void uploadImage(event.target.files?.[0]);
@@ -480,11 +496,11 @@ export default function ChatRoom({ session, userAName, userBName, onPokeChannel 
           onChange={(event) => handleDraft(event.target.value)}
           onFocus={lockPageAndExpandChat}
           onPointerDown={lockPageAndExpandChat}
-          placeholder="Write a little something…"
+          placeholder="พิมพ์ข้อความถึงกัน…"
           value={draft}
         />
         <button
-          aria-label="Send message"
+          aria-label="ส่งข้อความ"
           className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-plum text-white transition hover:bg-[#67435e] disabled:cursor-not-allowed disabled:opacity-50"
           disabled={uploading || !draft.trim()}
           type="submit"

@@ -1,5 +1,5 @@
 self.addEventListener("push", (event) => {
-  let data = { title: "A little hello", body: "Someone is thinking of you.", url: "/" };
+  let data = { title: "ข้อความใหม่", body: "มีข้อความใหม่ถึงคุณ 💌", url: "/" };
   if (event.data) {
     try {
       data = { ...data, ...event.data.json() };
@@ -8,14 +8,16 @@ self.addEventListener("push", (event) => {
     }
   }
 
-  event.waitUntil(
-    self.registration.showNotification(data.title, {
+  event.waitUntil((async () => {
+    const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+    if (windows.some((client) => client.focused && client.visibilityState === "visible")) return;
+    await self.registration.showNotification(data.title, {
       body: data.body,
       icon: "/icon.svg",
       badge: "/icon.svg",
       data: { url: data.url }
-    })
-  );
+    });
+  })());
 });
 
 self.addEventListener("notificationclick", (event) => {

@@ -79,6 +79,17 @@ create table if not exists public.daily_moods (
   primary key (user_id, mood_date)
 );
 
+create table if not exists public.push_subscriptions (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users (id) on delete cascade,
+  endpoint text not null unique,
+  subscription jsonb not null,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists push_subscriptions_user_id_idx
+  on public.push_subscriptions (user_id);
+
 create table if not exists public.pin_attempt_windows (
   attempt_key text primary key,
   window_started_at timestamptz not null default now(),
@@ -144,6 +155,9 @@ alter table public.bucket_list enable row level security;
 alter table public.couple_memories enable row level security;
 alter table public.couple_memory_likes enable row level security;
 alter table public.daily_moods enable row level security;
+alter table public.push_subscriptions enable row level security;
+revoke all on public.push_subscriptions from public, anon, authenticated;
+grant all on public.push_subscriptions to service_role;
 
 drop policy if exists "Couple members can view members" on public.couple_members;
 create policy "Couple members can view members"

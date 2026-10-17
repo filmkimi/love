@@ -13,11 +13,11 @@ type Mood = {
 };
 
 const choices = [
-  { label: "Happy", emoji: "😊" },
-  { label: "Tired", emoji: "😴" },
-  { label: "Need hugs", emoji: "🫂" },
-  { label: "Excited", emoji: "✨" },
-  { label: "Hungry", emoji: "🍜" }
+  { label: "Happy", display: "มีความสุข", emoji: "😊" },
+  { label: "Tired", display: "เหนื่อย", emoji: "😴" },
+  { label: "Need hugs", display: "อยากได้กอด", emoji: "🫂" },
+  { label: "Excited", display: "ตื่นเต้น", emoji: "✨" },
+  { label: "Hungry", display: "หิวแล้ว", emoji: "🍜" }
 ];
 
 export default function DailyMoodWidget({ session }: { session: Session }) {
@@ -39,13 +39,19 @@ export default function DailyMoodWidget({ session }: { session: Session }) {
         supabase.from("couple_members").select("user_id, display_name")
       ]);
       if (!active) return;
-      if (moodResult.error) setError(`Could not load today’s moods: ${moodResult.error.message}`);
+      if (moodResult.error) {
+        console.error("โหลดอารมณ์วันนี้ไม่สำเร็จ:", moodResult.error.message);
+        setError("โหลดอารมณ์วันนี้ไม่สำเร็จ กรุณาลองอีกครั้ง");
+      }
       else setMoods((current) => {
         const byUser = new Map((moodResult.data as Mood[]).map((mood) => [mood.user_id, mood]));
         current.forEach((mood) => byUser.set(mood.user_id, mood));
         return [...byUser.values()];
       });
-      if (memberResult.error) setError(`Could not load profile names: ${memberResult.error.message}`);
+      if (memberResult.error) {
+        console.error("โหลดชื่อโปรไฟล์ไม่สำเร็จ:", memberResult.error.message);
+        setError("โหลดชื่อโปรไฟล์ไม่สำเร็จ กรุณาลองอีกครั้ง");
+      }
       else setNames(Object.fromEntries(memberResult.data.map((member) => [member.user_id, member.display_name])));
       setLoading(false);
     }
@@ -65,7 +71,7 @@ export default function DailyMoodWidget({ session }: { session: Session }) {
         }
       })
       .subscribe((status) => {
-        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") setError("Live mood updates are unavailable.");
+        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") setError("ไม่สามารถอัปเดตอารมณ์แบบเรียลไทม์ได้");
       });
 
     return () => {
@@ -82,7 +88,10 @@ export default function DailyMoodWidget({ session }: { session: Session }) {
       .upsert({ user_id: session.user.id, mood_date: today, mood, updated_at: new Date().toISOString() }, { onConflict: "user_id,mood_date" })
       .select()
       .single();
-    if (updateError) setError(`Could not save your mood: ${updateError.message}`);
+    if (updateError) {
+      console.error("บันทึกอารมณ์ไม่สำเร็จ:", updateError.message);
+      setError("บันทึกอารมณ์ไม่สำเร็จ กรุณาลองอีกครั้ง");
+    }
     else {
       const updated = data as Mood;
       setMoods((current) => current.some((entry) => entry.user_id === updated.user_id)
@@ -98,9 +107,9 @@ export default function DailyMoodWidget({ session }: { session: Session }) {
     <section className="rounded-[1.8rem] border border-white/80 bg-white/85 p-5 shadow-soft sm:p-6">
       <div className="mb-4 flex items-center gap-2 text-plum/70">
         <Sparkles size={16} />
-        <p className="text-[10px] font-bold uppercase tracking-[0.2em]">A tiny check-in</p>
+        <p className="text-[10px] font-bold uppercase tracking-[0.2em]">แวะมาเล่าความรู้สึกกัน</p>
       </div>
-      <h2 className="serif text-2xl">How’s your heart today?</h2>
+      <h2 className="serif text-2xl">วันนี้หัวใจเป็นยังไงบ้าง?</h2>
       <div className="mt-4 flex flex-wrap gap-2">
         {choices.map((choice) => (
           <button
@@ -111,7 +120,7 @@ export default function DailyMoodWidget({ session }: { session: Session }) {
             onClick={() => void updateMood(choice.label)}
             type="button"
           >
-            <span>{choice.emoji}</span>{choice.label}
+            <span>{choice.emoji}</span>{choice.display}
           </button>
         ))}
       </div>
@@ -119,11 +128,11 @@ export default function DailyMoodWidget({ session }: { session: Session }) {
         {loading ? <LoaderCircle className="animate-spin text-plum/60" size={17} /> : partnerChoice ? (
           <>
             <span className="text-xl">{partnerChoice.emoji}</span>
-            <p className="text-sm text-ink/75"><span className="font-semibold">{names[partnerMood!.user_id] || "Your person"}</span> is feeling {partnerChoice.label.toLowerCase()} today.</p>
+            <p className="text-sm text-ink/75"><span className="font-semibold">{names[partnerMood!.user_id] || "คนรักของคุณ"}</span>วันนี้รู้สึกว่า{partnerChoice.display}</p>
             <Heart className="ml-auto shrink-0 text-[#d98da2]" size={16} />
           </>
         ) : (
-          <p className="text-sm text-ink/55">{saving ? "Saving your little check-in…" : "Your person hasn’t checked in yet today."}</p>
+          <p className="text-sm text-ink/55">{saving ? "กำลังบันทึกความรู้สึกของคุณ…" : "วันนี้คนรักของคุณยังไม่ได้บอกความรู้สึกเลย"}</p>
         )}
       </div>
       {error && <p className="mt-3 text-xs text-red-700" role="alert">{error}</p>}

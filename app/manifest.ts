@@ -2,9 +2,9 @@ import type { MetadataRoute } from "next";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "Our Little World",
-    short_name: "Our World",
-    description: "A little place for the two of us.",
+    name: "โลกใบเล็กของเรา",
+    short_name: "โลกของเรา",
+    description: "พื้นที่เล็ก ๆ สำหรับเราสองคน",
     start_url: "/",
     display: "standalone",
     background_color: "#fcf8f2",
