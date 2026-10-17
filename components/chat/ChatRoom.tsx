@@ -35,8 +35,10 @@ export default function ChatRoom({ session, userAName, userBName, onPokeChannel 
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
   const [liveStatus, setLiveStatus] = useState<"connecting" | "connected" | "reconnecting">("connecting");
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const stickToBottomRef = useRef(true);
+  const scrollAfterRenderRef = useRef(false);
   const channelRef = useRef<RealtimeChannel | null>(null);
   const typingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastTap = useRef<{ id: string; at: number } | null>(null);
@@ -58,9 +60,16 @@ export default function ChatRoom({ session, userAName, userBName, onPokeChannel 
     setMessages((current) => {
       const byId = new Map(loadedMessages.map((message) => [message.id, message]));
       current.forEach((message) => byId.set(message.id, message));
-      return [...byId.values()]
+      const merged = [...byId.values()]
         .sort((first, second) => first.created_at.localeCompare(second.created_at))
         .slice(-100);
+      if (
+        current.length === 0 ||
+        (stickToBottomRef.current && merged.length > current.length)
+      ) {
+        scrollAfterRenderRef.current = true;
+      }
+      return merged;
     });
 
     if (markRead) {
@@ -96,6 +105,7 @@ export default function ChatRoom({ session, userAName, userBName, onPokeChannel 
       .on("postgres_changes", { event: "*", schema: "public", table: "messages" }, (payload) => {
         const row = payload.new as Message;
         if (payload.eventType === "INSERT") {
+          if (stickToBottomRef.current) scrollAfterRenderRef.current = true;
           setMessages((current) => current.some((message) => message.id === row.id)
             ? current.map((message) => message.id === row.id ? row : message)
             : [...current, row].sort((first, second) => first.created_at.localeCompare(second.created_at)).slice(-100));
@@ -154,25 +164,49 @@ export default function ChatRoom({ session, userAName, userBName, onPokeChannel 
   }, [myName, onPokeChannel, refreshMessages, session.user.id, supabase]);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, typingUsers]);
+    if (!scrollAfterRenderRef.current) return;
+    scrollAfterRenderRef.current = false;
+    const frame = window.requestAnimationFrame(() => {
+      const container = scrollContainerRef.current;
+      if (container) container.scrollTop = container.scrollHeight;
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [messages.length]);
 
   const sendMessage = useCallback(async (text: string, imageUrl: string | null = null) => {
-    if (!text.trim() && !imageUrl) return;
+    const messageText = text.trim();
+    if ((!messageText && !imageUrl) || sending) return;
+    const messageId = crypto.randomUUID();
+    const optimisticMessage: Message = {
+      id: messageId,
+      sender_id: session.user.id,
+      text: messageText || null,
+      image_url: imageUrl,
+      reaction: null,
+      is_read: false,
+      created_at: new Date().toISOString()
+    };
+    scrollAfterRenderRef.current = true;
+    stickToBottomRef.current = true;
+    setMessages((current) => [...current, optimisticMessage].slice(-100));
+    setDraft("");
     setSending(true);
     setError("");
     const { data: insertedMessage, error: insertError } = await supabase.from("messages").insert({
+      id: messageId,
       sender_id: session.user.id,
-      text: text.trim() || null,
+      text: messageText || null,
       image_url: imageUrl
     }).select("*").single();
-    if (insertError) setError(`Message not sent: ${insertError.message}`);
+    if (insertError) {
+      setMessages((current) => current.filter((message) => message.id !== messageId));
+      setDraft(messageText);
+      setError(`Message not sent: ${insertError.message}`);
+    }
     else {
       const message = insertedMessage as Message;
-      setMessages((current) => current.some((item) => item.id === message.id)
-        ? current
-        : [...current, message].sort((first, second) => first.created_at.localeCompare(second.created_at)).slice(-100));
-      setDraft("");
+      setMessages((current) => current.map((item) => item.id === message.id ? message : item)
+        .sort((first, second) => first.created_at.localeCompare(second.created_at)).slice(-100));
     }
     setSending(false);
     await channelRef.current?.track({
@@ -181,8 +215,7 @@ export default function ChatRoom({ session, userAName, userBName, onPokeChannel 
       isTyping: false,
       online_at: new Date().toISOString()
     } satisfies PresenceState);
-    inputRef.current?.focus();
-  }, [myName, session.user.id, supabase]);
+  }, [myName, sending, session.user.id, supabase]);
 
   function handleDraft(value: string) {
     setDraft(value);
@@ -265,7 +298,14 @@ export default function ChatRoom({ session, userAName, userBName, onPokeChannel 
         </span>
       </header>
 
-      <div className="hide-scrollbar flex h-[410px] flex-col gap-4 overflow-y-auto bg-[linear-gradient(180deg,#fffdfb_0%,#fff9f7_100%)] px-4 py-5 sm:px-6">
+      <div
+        className="hide-scrollbar flex h-[min(52vh,410px)] min-h-[250px] flex-col gap-4 overflow-x-hidden overflow-y-auto overscroll-contain bg-[linear-gradient(180deg,#fffdfb_0%,#fff9f7_100%)] px-4 py-5 sm:h-[410px] sm:px-6"
+        onScroll={(event) => {
+          const element = event.currentTarget;
+          stickToBottomRef.current = element.scrollHeight - element.scrollTop - element.clientHeight < 80;
+        }}
+        ref={scrollContainerRef}
+      >
         <p className="mx-auto rounded-full bg-white/80 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.17em] text-ink/40">A little space for us</p>
         {loading && <LoaderCircle className="mx-auto mt-16 animate-spin text-plum/70" />}
         {!loading && messages.length === 0 && (
@@ -282,7 +322,6 @@ export default function ChatRoom({ session, userAName, userBName, onPokeChannel 
                 className={`flex ${mine ? "justify-end" : "justify-start"}`}
                 initial={{ opacity: 0, y: 8, scale: 0.97 }}
                 key={message.id}
-                layout
               >
                 <div
                   className={`relative max-w-[82%] cursor-pointer rounded-[1.35rem] px-4 py-3 text-sm shadow-sm ${mine ? "rounded-br-md bg-plum text-white" : "rounded-bl-md border border-rose-100/80 bg-white text-ink"}`}
@@ -337,7 +376,6 @@ export default function ChatRoom({ session, userAName, userBName, onPokeChannel 
           className="min-w-0 flex-1 rounded-full bg-[#f8f4f1] px-4 py-2.5 text-sm outline-none placeholder:text-ink/35"
           onChange={(event) => handleDraft(event.target.value)}
           placeholder="Write a little something…"
-          ref={inputRef}
           value={draft}
         />
         <button
