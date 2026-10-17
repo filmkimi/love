@@ -7,6 +7,7 @@ import type { RealtimeChannel, Session } from "@supabase/supabase-js";
 import { getSupabaseBrowserClient } from "@/lib/supabaseClient";
 import type { Message } from "@/lib/database.types";
 import { playSoftSound } from "@/lib/sounds";
+import { createUuid } from "@/lib/uuid";
 import PrivateImage from "@/components/PrivateImage";
 
 type ChatRoomProps = {
@@ -245,7 +246,14 @@ export default function ChatRoom({ session, userAName, userBName, onPokeChannel 
   const sendMessage = useCallback(async (text: string, imageUrl: string | null = null) => {
     const messageText = text.trim();
     if (!messageText && !imageUrl) return;
-    const messageId = crypto.randomUUID();
+    let messageId: string;
+    try {
+      messageId = createUuid();
+    } catch (error) {
+      console.error("สร้างรหัสข้อความไม่สำเร็จ:", error);
+      setError("ส่งข้อความไม่ได้ เนื่องจากเบราว์เซอร์นี้ไม่รองรับ กรุณาอัปเดตเบราว์เซอร์แล้วลองใหม่");
+      return;
+    }
     const optimisticMessage: Message = {
       id: messageId,
       sender_id: session.user.id,
@@ -358,7 +366,15 @@ export default function ChatRoom({ session, userAName, userBName, onPokeChannel 
     setUploading(true);
     setError("");
     const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "-");
-    const path = `${session.user.id}/${crypto.randomUUID()}-${safeName}`;
+    let path: string;
+    try {
+      path = `${session.user.id}/${createUuid()}-${safeName}`;
+    } catch (error) {
+      console.error("สร้างรหัสรูปภาพไม่สำเร็จ:", error);
+      setError("อัปโหลดรูปภาพไม่ได้ กรุณาอัปเดตเบราว์เซอร์แล้วลองใหม่");
+      setUploading(false);
+      return;
+    }
     const { data, error: uploadError } = await supabase.storage.from("chat-media").upload(path, file, {
       cacheControl: "3600",
       upsert: false,

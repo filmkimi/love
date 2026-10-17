@@ -9,8 +9,6 @@ self.addEventListener("push", (event) => {
   }
 
   event.waitUntil((async () => {
-    const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
-    if (!data.force && windows.some((client) => client.focused && client.visibilityState === "visible")) return;
     await self.registration.showNotification(data.title, {
       body: data.body,
       icon: "/icon.svg",

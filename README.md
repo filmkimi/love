@@ -39,7 +39,7 @@ Run the complete schema script again when upgrading an existing project or chang
 3. In Supabase **Database → Webhooks**, create a webhook for `public.messages`, event `INSERT`, method `POST`, pointing to `https://<your-domain>/api/push/webhook`. Add the request header `x-push-webhook-secret` with the exact `PUSH_WEBHOOK_SECRET` value. The webhook only sends a generic notification and does not include message text.
 4. Deploy over HTTPS, install/open the PWA on each device, sign in, and tap **เปิดแจ้งเตือน**. Push permission must be granted on each device. On iPhone/iPad, add the website to the Home Screen first; Web Push requires iOS/iPadOS 16.4 or later.
 
-The app does not send push notifications for every keystroke. Typing status stays live in an open chat; a push is sent for each newly inserted message and each “คิดถึงนะ” poke. Notifications are suppressed while the app is focused. To enable the LINE fallback, set `LINE_CHANNEL_ACCESS_TOKEN` and `LINE_USER_ID` in the server environment.
+The app does not send push notifications for every keystroke. Typing status stays live in an open chat; a push is sent for each newly inserted message and each “คิดถึงนะ” poke. Push notifications are delivered on supported desktop and mobile browsers after enabling them on each device. To enable the LINE fallback, set `LINE_CHANNEL_ACCESS_TOKEN` and `LINE_USER_ID` in the server environment.
 
 ## Deploy
 

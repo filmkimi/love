@@ -6,6 +6,7 @@ import type { Session } from "@supabase/supabase-js";
 import { getSupabaseBrowserClient } from "@/lib/supabaseClient";
 import type { CoupleMemory, CoupleMemoryLike } from "@/lib/database.types";
 import PrivateImage from "@/components/PrivateImage";
+import { createUuid } from "@/lib/uuid";
 
 const memoryMoods = [
   { value: "First Date", label: "เดตแรกของเรา" },
@@ -127,7 +128,15 @@ export default function MemoryTimeline({ session }: { session: Session }) {
     setSaving(true);
     setError("");
     const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "-");
-    const path = `${session.user.id}/${crypto.randomUUID()}-${safeName}`;
+    let path: string;
+    try {
+      path = `${session.user.id}/${createUuid()}-${safeName}`;
+    } catch (error) {
+      console.error("สร้างรหัสรูปภาพไม่สำเร็จ:", error);
+      setError("อัปโหลดรูปภาพไม่ได้ กรุณาอัปเดตเบราว์เซอร์แล้วลองใหม่");
+      setSaving(false);
+      return;
+    }
     const { data: upload, error: uploadError } = await supabase.storage.from("couple-memories").upload(path, file, {
       cacheControl: "3600",
       upsert: false,
