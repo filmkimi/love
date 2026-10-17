@@ -13,6 +13,14 @@ function decodeApplicationServerKey(value: string): ArrayBuffer {
   return bytes.buffer;
 }
 
+function subscriptionUsesKey(subscription: PushSubscription, publicKey: string) {
+  const currentKey = subscription.options.applicationServerKey;
+  if (!currentKey) return false;
+  const expectedKey = new Uint8Array(decodeApplicationServerKey(publicKey));
+  const actualKey = new Uint8Array(currentKey);
+  return expectedKey.length === actualKey.length && expectedKey.every((byte, index) => byte === actualKey[index]);
+}
+
 function isInstalledIosApp() {
   const isIos = /iphone|ipad|ipod/i.test(navigator.userAgent);
   const standaloneNavigator = navigator as Navigator & { standalone?: boolean };
@@ -44,6 +52,11 @@ export default function PushNotificationControl({ session }: PushNotificationCon
       .then((registration) => registration.pushManager.getSubscription())
       .then(async (subscription) => {
         if (!active || !subscription || Notification.permission !== "granted") return;
+        if (!subscriptionUsesKey(subscription, publicKey)) {
+          await subscription.unsubscribe();
+          if (active) setMessage("คีย์แจ้งเตือนมีการเปลี่ยนแปลง กรุณากดเปิดแจ้งเตือนอีกครั้ง");
+          return;
+        }
         const response = await fetch("/api/push/subscription", {
           method: "POST",
           headers: {
@@ -95,7 +108,12 @@ export default function PushNotificationControl({ session }: PushNotificationCon
       }
 
       const registration = await navigator.serviceWorker.ready;
-      const current = await registration.pushManager.getSubscription();
+      let current = await registration.pushManager.getSubscription();
+      if (current && !subscriptionUsesKey(current, publicKey)) {
+        await current.unsubscribe();
+        current = null;
+        setEnabled(false);
+      }
       if (enabled && current) {
         const response = await fetch("/api/push/subscription", {
           method: "DELETE",
@@ -135,6 +153,28 @@ export default function PushNotificationControl({ session }: PushNotificationCon
     }
   }
 
+  async function sendTestNotification() {
+    if (busy) return;
+    setBusy(true);
+    setMessage("");
+    try {
+      const response = await fetch("/api/push/test", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${session.access_token}` }
+      });
+      const result = await response.json() as { sent?: number; error?: string };
+      if (!response.ok) throw new Error(result.error || "ทดสอบการแจ้งเตือนไม่สำเร็จ");
+      setMessage(result.sent
+        ? "ส่งการแจ้งเตือนทดสอบแล้ว ลองดูที่หน้าจออุปกรณ์นะ"
+        : "ยังไม่มีอุปกรณ์นี้ลงทะเบียนรับแจ้งเตือน กรุณาปิดแล้วเปิดการแจ้งเตือนใหม่");
+    } catch (error) {
+      console.error("Could not send test notification:", error);
+      setMessage(error instanceof Error ? error.message : "ทดสอบการแจ้งเตือนไม่สำเร็จ");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <div className="flex flex-col items-end gap-1">
       <button
@@ -146,6 +186,16 @@ export default function PushNotificationControl({ session }: PushNotificationCon
         {busy ? <LoaderCircle className="animate-spin" size={16} /> : enabled ? <BellOff size={16} /> : <Bell size={16} />}
         <span className="hidden sm:inline">{enabled ? "ปิดแจ้งเตือน" : "เปิดแจ้งเตือน"}</span>
       </button>
+      {enabled && (
+        <button
+          className="text-[10px] font-medium text-plum/70 underline underline-offset-2 disabled:opacity-50 sm:text-xs"
+          disabled={busy}
+          onClick={() => void sendTestNotification()}
+          type="button"
+        >
+          ส่งแจ้งเตือนทดสอบ
+        </button>
+      )}
       {message && <p aria-live="polite" className="max-w-56 text-right text-[10px] leading-4 text-ink/55 sm:text-xs">{message}</p>}
     </div>
   );

@@ -11,9 +11,15 @@ let vapidConfigured = false;
 function configureWebPush() {
   const publicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
   const privateKey = process.env.VAPID_PRIVATE_KEY;
-  const subject = process.env.VAPID_SUBJECT;
-  if (!publicKey || !privateKey || !subject) {
+  const configuredSubject = process.env.VAPID_SUBJECT?.trim();
+  if (!publicKey || !privateKey || !configuredSubject) {
     throw new Error("Web Push VAPID settings are missing.");
+  }
+  const subject = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(configuredSubject)
+    ? `mailto:${configuredSubject}`
+    : configuredSubject;
+  if (!subject.startsWith("mailto:") && !/^https:\/\//i.test(subject)) {
+    throw new Error("VAPID_SUBJECT must be an email address, mailto URI, or HTTPS URL.");
   }
   if (!vapidConfigured) {
     webpush.setVapidDetails(subject, publicKey, privateKey);
@@ -30,7 +36,7 @@ function createAdminClient() {
   });
 }
 
-export async function sendPushToMember(userId: string, title: string, body: string, url = "/") {
+export async function sendPushToMember(userId: string, title: string, body: string, url = "/", force = false) {
   configureWebPush();
   const supabase = createAdminClient();
   const { data: subscriptions, error } = await supabase
@@ -43,7 +49,7 @@ export async function sendPushToMember(userId: string, title: string, body: stri
     subscriptions.map(async (record) => {
       const subscription = record.subscription as StoredSubscription;
       try {
-        await webpush.sendNotification(subscription, JSON.stringify({ title, body, url }));
+        await webpush.sendNotification(subscription, JSON.stringify({ title, body, url, force }));
         return true;
       } catch (sendError) {
         const statusCode = (sendError as { statusCode?: number }).statusCode;
