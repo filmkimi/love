@@ -62,3 +62,32 @@ input:focus-visible {
 .safe-page-bottom {
   padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 2.5rem);
 }
+
+@media (max-width: 767px) {
+  .chat-room-mobile-focused {
+    position: fixed;
+    z-index: 80;
+    inset-inline: 0;
+    top: var(--chat-viewport-top, 0px);
+    display: flex;
+    width: 100%;
+    height: var(--chat-viewport-height, 100dvh);
+    min-height: 0;
+    flex-direction: column;
+    border-radius: 0;
+    overscroll-behavior: none;
+  }
+
+  .chat-room-mobile-focused > header,
+  .chat-room-mobile-focused > form {
+    flex: none;
+  }
+
+  .chat-room-mobile-focused > .chat-room-messages {
+    height: auto;
+    min-height: 0;
+    flex: 1 1 0%;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+}

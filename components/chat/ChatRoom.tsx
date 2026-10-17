@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { Check, CheckCheck, ImagePlus, LoaderCircle, Send } from "lucide-react";
+import { Check, CheckCheck, ImagePlus, LoaderCircle, Send, X } from "lucide-react";
 import type { RealtimeChannel, Session } from "@supabase/supabase-js";
 import { getSupabaseBrowserClient } from "@/lib/supabaseClient";
 import type { Message } from "@/lib/database.types";
@@ -24,6 +24,16 @@ function formatTime(date: string) {
   return new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(new Date(date));
 }
 
+function sameMessage(first: Message, second: Message) {
+  return first.id === second.id
+    && first.sender_id === second.sender_id
+    && first.text === second.text
+    && first.image_url === second.image_url
+    && first.reaction === second.reaction
+    && first.is_read === second.is_read
+    && first.created_at === second.created_at;
+}
+
 export default function ChatRoom({ session, userAName, userBName, onPokeChannel }: ChatRoomProps) {
   const supabase = getSupabaseBrowserClient();
   const [messages, setMessages] = useState<Message[]>([]);
@@ -31,14 +41,21 @@ export default function ChatRoom({ session, userAName, userBName, onPokeChannel 
   const [typingUsers, setTypingUsers] = useState<string[]>([]);
   const [onlineUsers, setOnlineUsers] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
-  const [sending, setSending] = useState(false);
+  const [pendingMessages, setPendingMessages] = useState(0);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
   const [liveStatus, setLiveStatus] = useState<"connecting" | "connected" | "reconnecting">("connecting");
+  const [mobileFocused, setMobileFocused] = useState(false);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
-  const bottomRef = useRef<HTMLDivElement>(null);
   const stickToBottomRef = useRef(true);
   const scrollAfterRenderRef = useRef(false);
+  const savedScrollYRef = useRef(0);
+  const savedPageStylesRef = useRef<{
+    body: { position: string; top: string; left: string; right: string; width: string; overflow: string };
+    htmlOverflow: string;
+    viewportHeight: string;
+    viewportTop: string;
+  } | null>(null);
   const channelRef = useRef<RealtimeChannel | null>(null);
   const typingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastTap = useRef<{ id: string; at: number } | null>(null);
@@ -58,8 +75,8 @@ export default function ChatRoom({ session, userAName, userBName, onPokeChannel 
 
     const loadedMessages = (data as Message[]).reverse();
     setMessages((current) => {
-      const byId = new Map(loadedMessages.map((message) => [message.id, message]));
-      current.forEach((message) => byId.set(message.id, message));
+      const byId = new Map(current.map((message) => [message.id, message]));
+      loadedMessages.forEach((message) => byId.set(message.id, message));
       const merged = [...byId.values()]
         .sort((first, second) => first.created_at.localeCompare(second.created_at))
         .slice(-100);
@@ -68,6 +85,9 @@ export default function ChatRoom({ session, userAName, userBName, onPokeChannel 
         (stickToBottomRef.current && merged.length > current.length)
       ) {
         scrollAfterRenderRef.current = true;
+      }
+      if (current.length === merged.length && current.every((message, index) => sameMessage(message, merged[index]))) {
+        return current;
       }
       return merged;
     });
@@ -87,9 +107,9 @@ export default function ChatRoom({ session, userAName, userBName, onPokeChannel 
   useEffect(() => {
     let active = true;
     const sync = () => {
-      void refreshMessages(document.visibilityState === "visible");
+      if (document.visibilityState === "visible") void refreshMessages(true);
     };
-    const interval = window.setInterval(sync, 12_000);
+    const interval = window.setInterval(sync, 3_000);
     document.addEventListener("visibilitychange", sync);
     window.addEventListener("focus", sync);
     void refreshMessages().finally(() => {
@@ -164,6 +184,45 @@ export default function ChatRoom({ session, userAName, userBName, onPokeChannel 
   }, [myName, onPokeChannel, refreshMessages, session.user.id, supabase]);
 
   useEffect(() => {
+    if (!mobileFocused) return;
+
+    const root = document.documentElement;
+    const viewport = window.visualViewport;
+    const updateViewportSize = () => {
+      root.style.setProperty("--chat-viewport-height", `${viewport?.height ?? window.innerHeight}px`);
+      root.style.setProperty("--chat-viewport-top", `${viewport?.offsetTop ?? 0}px`);
+    };
+    updateViewportSize();
+    viewport?.addEventListener("resize", updateViewportSize);
+    viewport?.addEventListener("scroll", updateViewportSize);
+    window.addEventListener("orientationchange", updateViewportSize);
+
+    return () => {
+      viewport?.removeEventListener("resize", updateViewportSize);
+      viewport?.removeEventListener("scroll", updateViewportSize);
+      window.removeEventListener("orientationchange", updateViewportSize);
+      const saved = savedPageStylesRef.current;
+      if (!saved) return;
+
+      const body = document.body.style;
+      body.position = saved.body.position;
+      body.top = saved.body.top;
+      body.left = saved.body.left;
+      body.right = saved.body.right;
+      body.width = saved.body.width;
+      body.overflow = saved.body.overflow;
+      root.style.overflow = saved.htmlOverflow;
+      if (saved.viewportHeight) root.style.setProperty("--chat-viewport-height", saved.viewportHeight);
+      else root.style.removeProperty("--chat-viewport-height");
+      if (saved.viewportTop) root.style.setProperty("--chat-viewport-top", saved.viewportTop);
+      else root.style.removeProperty("--chat-viewport-top");
+      const scrollY = savedScrollYRef.current;
+      savedPageStylesRef.current = null;
+      window.scrollTo(0, scrollY);
+    };
+  }, [mobileFocused]);
+
+  useEffect(() => {
     if (!scrollAfterRenderRef.current) return;
     scrollAfterRenderRef.current = false;
     const frame = window.requestAnimationFrame(() => {
@@ -175,7 +234,7 @@ export default function ChatRoom({ session, userAName, userBName, onPokeChannel 
 
   const sendMessage = useCallback(async (text: string, imageUrl: string | null = null) => {
     const messageText = text.trim();
-    if ((!messageText && !imageUrl) || sending) return;
+    if (!messageText && !imageUrl) return;
     const messageId = crypto.randomUUID();
     const optimisticMessage: Message = {
       id: messageId,
@@ -190,32 +249,38 @@ export default function ChatRoom({ session, userAName, userBName, onPokeChannel 
     stickToBottomRef.current = true;
     setMessages((current) => [...current, optimisticMessage].slice(-100));
     setDraft("");
-    setSending(true);
+    setPendingMessages((count) => count + 1);
     setError("");
-    const { data: insertedMessage, error: insertError } = await supabase.from("messages").insert({
-      id: messageId,
-      sender_id: session.user.id,
-      text: messageText || null,
-      image_url: imageUrl
-    }).select("*").single();
-    if (insertError) {
-      setMessages((current) => current.filter((message) => message.id !== messageId));
-      setDraft(messageText);
-      setError(`Message not sent: ${insertError.message}`);
-    }
-    else {
+    try {
+      const { data: insertedMessage, error: insertError } = await supabase.from("messages").insert({
+        id: messageId,
+        sender_id: session.user.id,
+        text: messageText || null,
+        image_url: imageUrl
+      }).select("*").single();
+      if (insertError) {
+        setMessages((current) => current.filter((message) => message.id !== messageId));
+        setDraft((current) => current || messageText);
+        setError(`Message not sent: ${insertError.message}`);
+        return;
+      }
       const message = insertedMessage as Message;
       setMessages((current) => current.map((item) => item.id === message.id ? message : item)
         .sort((first, second) => first.created_at.localeCompare(second.created_at)).slice(-100));
+    } catch (error) {
+      setMessages((current) => current.filter((message) => message.id !== messageId));
+      setDraft((current) => current || messageText);
+      setError(`Message not sent: ${error instanceof Error ? error.message : "Connection failed."}`);
+    } finally {
+      setPendingMessages((count) => Math.max(0, count - 1));
     }
-    setSending(false);
-    await channelRef.current?.track({
+    void channelRef.current?.track({
       user_id: session.user.id,
       name: myName,
       isTyping: false,
       online_at: new Date().toISOString()
     } satisfies PresenceState);
-  }, [myName, sending, session.user.id, supabase]);
+  }, [myName, session.user.id, supabase]);
 
   function handleDraft(value: string) {
     setDraft(value);
@@ -234,6 +299,38 @@ export default function ChatRoom({ session, userAName, userBName, onPokeChannel 
         online_at: new Date().toISOString()
       } satisfies PresenceState);
     }, 1400);
+  }
+
+  function lockPageAndExpandChat() {
+    if (!window.matchMedia("(max-width: 767px)").matches || savedPageStylesRef.current) {
+      if (window.matchMedia("(max-width: 767px)").matches) setMobileFocused(true);
+      return;
+    }
+
+    const body = document.body.style;
+    const root = document.documentElement;
+    savedScrollYRef.current = window.scrollY;
+    savedPageStylesRef.current = {
+      body: {
+        position: body.position,
+        top: body.top,
+        left: body.left,
+        right: body.right,
+        width: body.width,
+        overflow: body.overflow
+      },
+      htmlOverflow: root.style.overflow,
+      viewportHeight: root.style.getPropertyValue("--chat-viewport-height"),
+      viewportTop: root.style.getPropertyValue("--chat-viewport-top")
+    };
+    body.position = "fixed";
+    body.top = `-${savedScrollYRef.current}px`;
+    body.left = "0";
+    body.right = "0";
+    body.width = "100%";
+    body.overflow = "hidden";
+    root.style.overflow = "hidden";
+    setMobileFocused(true);
   }
 
   async function uploadImage(file: File | undefined) {
@@ -282,7 +379,7 @@ export default function ChatRoom({ session, userAName, userBName, onPokeChannel 
   }
 
   return (
-    <section className="overflow-hidden rounded-[1.8rem] border border-white/80 bg-white/85 shadow-soft backdrop-blur">
+    <section className={`chat-room overflow-hidden rounded-[1.8rem] border border-white/80 bg-white/85 shadow-soft backdrop-blur${mobileFocused ? " chat-room-mobile-focused" : ""}`}>
       <header className="flex items-center justify-between border-b border-rose-100/70 px-5 py-4 sm:px-6">
         <div className="flex items-center gap-3">
           <div className="relative grid h-11 w-11 place-items-center rounded-full bg-blush text-xl">💌
@@ -293,13 +390,20 @@ export default function ChatRoom({ session, userAName, userBName, onPokeChannel 
             <p className="text-xs text-ink/55">{liveStatus === "connected" ? (onlineUsers.length ? "Here with you now" : "Just between us") : liveStatus === "connecting" ? "Connecting…" : "Reconnecting · syncing messages"}</p>
           </div>
         </div>
-        <span className="rounded-full bg-[#f8f3ee] px-3 py-1.5 text-[11px] font-semibold text-plum">
-          {onlineUsers.length ? "Active now" : userBName}
-        </span>
+        <div className="flex items-center gap-2">
+          <span className="rounded-full bg-[#f8f3ee] px-3 py-1.5 text-[11px] font-semibold text-plum">
+            {onlineUsers.length ? "Active now" : userBName}
+          </span>
+          {mobileFocused && (
+            <button aria-label="Close full-screen chat" className="grid h-9 w-9 place-items-center rounded-full bg-[#f8f3ee] text-plum md:hidden" onClick={() => setMobileFocused(false)} type="button">
+              <X size={18} />
+            </button>
+          )}
+        </div>
       </header>
 
       <div
-        className="hide-scrollbar flex h-[min(52vh,410px)] min-h-[250px] flex-col gap-4 overflow-x-hidden overflow-y-auto overscroll-contain bg-[linear-gradient(180deg,#fffdfb_0%,#fff9f7_100%)] px-4 py-5 sm:h-[410px] sm:px-6"
+        className="chat-room-messages hide-scrollbar flex h-[min(52vh,410px)] min-h-[250px] flex-col gap-4 overflow-x-hidden overflow-y-auto overscroll-contain bg-[linear-gradient(180deg,#fffdfb_0%,#fff9f7_100%)] px-4 py-5 sm:h-[410px] sm:px-6"
         onScroll={(event) => {
           const element = event.currentTarget;
           stickToBottomRef.current = element.scrollHeight - element.scrollTop - element.clientHeight < 80;
@@ -354,7 +458,6 @@ export default function ChatRoom({ session, userAName, userBName, onPokeChannel 
             {typingUsers[0]} is typing
           </div>
         )}
-        <div ref={bottomRef} />
       </div>
 
       {error && <p className="bg-red-50 px-5 py-2 text-xs text-red-700" role="alert">{error}</p>}
@@ -367,7 +470,7 @@ export default function ChatRoom({ session, userAName, userBName, onPokeChannel 
       >
         <label className="grid h-10 w-10 shrink-0 cursor-pointer place-items-center rounded-full text-plum/75 transition hover:bg-blush" title="Share an image">
           {uploading ? <LoaderCircle className="animate-spin" size={18} /> : <ImagePlus size={19} />}
-          <input accept="image/*" className="sr-only" disabled={uploading || sending} onChange={(event) => {
+          <input accept="image/*" className="sr-only" disabled={uploading} onChange={(event) => {
             void uploadImage(event.target.files?.[0]);
             event.currentTarget.value = "";
           }} type="file" />
@@ -375,16 +478,18 @@ export default function ChatRoom({ session, userAName, userBName, onPokeChannel 
         <input
           className="min-w-0 flex-1 rounded-full bg-[#f8f4f1] px-4 py-2.5 text-sm outline-none placeholder:text-ink/35"
           onChange={(event) => handleDraft(event.target.value)}
+          onFocus={lockPageAndExpandChat}
+          onPointerDown={lockPageAndExpandChat}
           placeholder="Write a little something…"
           value={draft}
         />
         <button
           aria-label="Send message"
           className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-plum text-white transition hover:bg-[#67435e] disabled:cursor-not-allowed disabled:opacity-50"
-          disabled={sending || uploading || !draft.trim()}
+          disabled={uploading || !draft.trim()}
           type="submit"
         >
-          {sending ? <LoaderCircle className="animate-spin" size={17} /> : <Send size={17} />}
+          {pendingMessages > 0 ? <LoaderCircle className="animate-spin" size={17} /> : <Send size={17} />}
         </button>
       </form>
     </section>
