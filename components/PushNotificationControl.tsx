@@ -53,6 +53,14 @@ export default function PushNotificationControl({ session }: PushNotificationCon
       .then(async (subscription) => {
         if (!active || !subscription || Notification.permission !== "granted") return;
         if (!subscriptionUsesKey(subscription, publicKey)) {
+          await fetch("/api/push/subscription", {
+            method: "DELETE",
+            headers: {
+              Authorization: `Bearer ${session.access_token}`,
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify({ endpoint: subscription.endpoint })
+          });
           await subscription.unsubscribe();
           if (active) setMessage("คีย์แจ้งเตือนมีการเปลี่ยนแปลง กรุณากดเปิดแจ้งเตือนอีกครั้ง");
           return;
@@ -162,14 +170,46 @@ export default function PushNotificationControl({ session }: PushNotificationCon
         method: "POST",
         headers: { Authorization: `Bearer ${session.access_token}` }
       });
-      const result = await response.json() as { sent?: number; error?: string };
-      if (!response.ok) throw new Error(result.error || "ทดสอบการแจ้งเตือนไม่สำเร็จ");
+      const result = await response.json() as { sent?: number; failed?: number; providerStatusCodes?: number[]; error?: string };
+      if (!response.ok) {
+        const statusCodes = result.providerStatusCodes?.length
+          ? ` (รหัสจากผู้ให้บริการ: ${result.providerStatusCodes.join(", ")})`
+          : "";
+        throw new Error(`${result.error || "ทดสอบการแจ้งเตือนไม่สำเร็จ"}${statusCodes}`);
+      }
       setMessage(result.sent
-        ? "ส่งการแจ้งเตือนทดสอบแล้ว ลองดูที่หน้าจออุปกรณ์นะ"
-        : "ยังไม่มีอุปกรณ์นี้ลงทะเบียนรับแจ้งเตือน กรุณาปิดแล้วเปิดการแจ้งเตือนใหม่");
+        ? "เซิร์ฟเวอร์ส่งแจ้งเตือนแล้ว ถ้าไม่เห็น ให้ตรวจการแจ้งเตือนของเบราว์เซอร์และ Windows"
+        : "เซิร์ฟเวอร์ทำงาน แต่ยังไม่พบอุปกรณ์สมัครรับแจ้งเตือน กรุณากดปิดแล้วเปิดแจ้งเตือนใหม่");
     } catch (error) {
       console.error("Could not send test notification:", error);
       setMessage(error instanceof Error ? error.message : "ทดสอบการแจ้งเตือนไม่สำเร็จ");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function sendLocalTestNotification() {
+    if (busy) return;
+    setBusy(true);
+    setMessage("");
+    try {
+      if (!("Notification" in window) || !("serviceWorker" in navigator)) {
+        throw new Error("เบราว์เซอร์นี้ไม่รองรับการแจ้งเตือน");
+      }
+      if (Notification.permission !== "granted") {
+        throw new Error("ยังไม่ได้อนุญาตการแจ้งเตือนในเบราว์เซอร์");
+      }
+      const registration = await navigator.serviceWorker.ready;
+      await registration.showNotification("ทดสอบการแจ้งเตือนบนอุปกรณ์", {
+        body: "ถ้าเห็นข้อความนี้ การแจ้งเตือนของเบราว์เซอร์ทำงานแล้ว 💌",
+        icon: "/icon.svg",
+        badge: "/icon.svg",
+        tag: "local-push-test"
+      });
+      setMessage("ส่งการแจ้งเตือนทดสอบจากเบราว์เซอร์แล้ว ตรวจแถบแจ้งเตือนของอุปกรณ์");
+    } catch (error) {
+      console.error("Could not show a local notification:", error);
+      setMessage(error instanceof Error ? error.message : "ทดสอบการแจ้งเตือนบนอุปกรณ์ไม่สำเร็จ");
     } finally {
       setBusy(false);
     }
@@ -187,14 +227,24 @@ export default function PushNotificationControl({ session }: PushNotificationCon
         <span className="hidden sm:inline">{enabled ? "ปิดแจ้งเตือน" : "เปิดแจ้งเตือน"}</span>
       </button>
       {enabled && (
-        <button
-          className="text-[10px] font-medium text-plum/70 underline underline-offset-2 disabled:opacity-50 sm:text-xs"
-          disabled={busy}
-          onClick={() => void sendTestNotification()}
-          type="button"
-        >
-          ส่งแจ้งเตือนทดสอบ
-        </button>
+        <div className="flex gap-2">
+          <button
+            className="text-[10px] font-medium text-plum/70 underline underline-offset-2 disabled:opacity-50 sm:text-xs"
+            disabled={busy}
+            onClick={() => void sendLocalTestNotification()}
+            type="button"
+          >
+            ทดสอบบนเครื่อง
+          </button>
+          <button
+            className="text-[10px] font-medium text-plum/70 underline underline-offset-2 disabled:opacity-50 sm:text-xs"
+            disabled={busy}
+            onClick={() => void sendTestNotification()}
+            type="button"
+          >
+            ทดสอบจากเซิร์ฟเวอร์
+          </button>
+        </div>
       )}
       {message && <p aria-live="polite" className="max-w-56 text-right text-[10px] leading-4 text-ink/55 sm:text-xs">{message}</p>}
     </div>

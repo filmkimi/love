@@ -1,3 +1,11 @@
+self.addEventListener("install", () => {
+  self.skipWaiting();
+});
+
+self.addEventListener("activate", (event) => {
+  event.waitUntil(self.clients.claim());
+});
+
 self.addEventListener("push", (event) => {
   let data = { title: "ข้อความใหม่", body: "มีข้อความใหม่ถึงคุณ 💌", url: "/", force: false };
   if (event.data) {

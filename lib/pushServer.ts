@@ -6,6 +6,8 @@ type StoredSubscription = {
   keys: { p256dh: string; auth: string };
 };
 
+type PushDeliveryError = Error & { statusCode?: number; providerBody?: string };
+
 let vapidConfigured = false;
 
 function configureWebPush() {
@@ -52,7 +54,8 @@ export async function sendPushToMember(userId: string, title: string, body: stri
         await webpush.sendNotification(subscription, JSON.stringify({ title, body, url, force }));
         return true;
       } catch (sendError) {
-        const statusCode = (sendError as { statusCode?: number }).statusCode;
+        const providerError = sendError as PushDeliveryError;
+        const statusCode = providerError.statusCode;
         if (statusCode === 404 || statusCode === 410) {
           const { error: deleteError } = await supabase
             .from("push_subscriptions")
@@ -61,7 +64,10 @@ export async function sendPushToMember(userId: string, title: string, body: stri
           if (deleteError) throw new Error(`Could not remove expired push subscription: ${deleteError.message}`);
           return false;
         }
-        throw sendError;
+        throw Object.assign(new Error("Push provider rejected this notification."), {
+          statusCode,
+          providerBody: providerError.providerBody
+        });
       }
     })
   );
@@ -70,7 +76,12 @@ export async function sendPushToMember(userId: string, title: string, body: stri
     console.error("One or more Web Push notifications failed:", failed);
   }
   const sent = results.filter((result) => result.status === "fulfilled" && result.value).length;
-  return { sent, failed: failed.length };
+  const providerStatusCodes = failed.flatMap((result) => {
+    if (result.status !== "rejected") return [];
+    const statusCode = (result.reason as PushDeliveryError)?.statusCode;
+    return statusCode ? [statusCode] : [];
+  });
+  return { sent, failed: failed.length, providerStatusCodes };
 }
 
 export function createPushAdminClient() {

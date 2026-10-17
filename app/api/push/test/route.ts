@@ -37,9 +37,23 @@ export async function POST(request: Request) {
       "/",
       true
     );
+    if (result.failed) {
+      return NextResponse.json({
+        ...result,
+        error: "บริการแจ้งเตือนปฏิเสธคำขอ ตรวจสอบรหัส VAPID ใน Vercel และลงทะเบียนอุปกรณ์ใหม่"
+      }, { status: 502 });
+    }
     return NextResponse.json(result);
   } catch (error) {
     console.error("Could not send test Web Push:", error);
-    return NextResponse.json({ error: "ทดสอบการแจ้งเตือนไม่สำเร็จ กรุณาตรวจสอบการตั้งค่าเซิร์ฟเวอร์" }, { status: 500 });
+    const detail = error instanceof Error ? error.message : "";
+    const missingSubscriptions = detail.includes("Web Push VAPID settings are missing")
+      || detail.includes("Supabase server settings are missing");
+    return NextResponse.json({
+      error: missingSubscriptions
+        ? "การตั้งค่าฝั่ง Vercel ยังไม่ครบ กรุณาตรวจสอบ VAPID และ Supabase server key"
+        : "ทดสอบการแจ้งเตือนไม่สำเร็จ กรุณาตรวจสอบ Vercel logs",
+      configurationError: missingSubscriptions
+    }, { status: 500 });
   }
 }
