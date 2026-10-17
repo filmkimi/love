@@ -112,11 +112,16 @@ export default function ChatRoom({ session, userAName, userBName, onPokeChannel 
   useEffect(() => {
     let active = true;
     const sync = () => {
-      if (document.visibilityState === "visible") void refreshMessages(true);
+      if (document.visibilityState === "visible") {
+        void refreshMessages(true);
+        if (navigator.onLine) supabase.realtime.connect();
+      }
     };
     const interval = window.setInterval(sync, 3_000);
     document.addEventListener("visibilitychange", sync);
     window.addEventListener("focus", sync);
+    window.addEventListener("online", sync);
+    window.addEventListener("pageshow", sync);
     void refreshMessages().finally(() => {
       if (active) setLoading(false);
     });
@@ -162,7 +167,7 @@ export default function ChatRoom({ session, userAName, userBName, onPokeChannel 
       .subscribe(async (status) => {
         if (status === "SUBSCRIBED") {
           setLiveStatus("connected");
-          setError((current) => current.startsWith("การเชื่อมต่อแชตขาดหาย:") ? "" : current);
+          setError((current) => current.startsWith("การเชื่อมต่อแชตขาดหาย") ? "" : current);
           void refreshMessages(document.visibilityState === "visible");
           const presence: PresenceState = {
             user_id: session.user.id,
@@ -188,6 +193,8 @@ export default function ChatRoom({ session, userAName, userBName, onPokeChannel 
       window.clearInterval(interval);
       document.removeEventListener("visibilitychange", sync);
       window.removeEventListener("focus", sync);
+      window.removeEventListener("online", sync);
+      window.removeEventListener("pageshow", sync);
       if (typingTimer.current) clearTimeout(typingTimer.current);
       onPokeChannel(null);
       void supabase.removeChannel(channel);
