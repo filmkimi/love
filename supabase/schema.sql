@@ -359,4 +359,59 @@ begin
 end
 $$;
 
+-- Store the same newly rotated value as Vercel's PUSH_WEBHOOK_SECRET in
+-- Supabase Vault under the name push_webhook_secret before enabling this trigger.
+create extension if not exists pg_net;
+
+create or replace function public.send_push_notification_webhook()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  webhook_secret text;
+begin
+  select decrypted_secret
+  into webhook_secret
+  from vault.decrypted_secrets
+  where name = 'push_webhook_secret'
+  limit 1;
+
+  if webhook_secret is null then
+    raise warning 'Push webhook secret is missing from Supabase Vault; message was saved without a push notification.';
+    return new;
+  end if;
+
+  begin
+    perform net.http_post(
+      url := 'https://love-delta-sage.vercel.app/api/push/webhook',
+      headers := pg_catalog.jsonb_build_object(
+        'Content-Type', 'application/json',
+        'x-push-webhook-secret', webhook_secret
+      ),
+      body := pg_catalog.jsonb_build_object(
+        'type', tg_op,
+        'table', tg_table_name,
+        'schema', tg_table_schema,
+        'record', pg_catalog.to_jsonb(new)
+      ),
+      timeout_milliseconds := 5000
+    );
+  exception when others then
+    raise warning 'Could not queue push notification: %', sqlerrm;
+  end;
+
+  return new;
+end;
+$$;
+
+revoke all on function public.send_push_notification_webhook() from public, anon, authenticated;
+
+drop trigger if exists "push-notification-webhook" on public.messages;
+create trigger "push-notification-webhook"
+  after insert on public.messages
+  for each row
+  execute function public.send_push_notification_webhook();
+
 notify pgrst, 'reload schema';

@@ -18,6 +18,7 @@ type ChatRoomProps = {
 };
 
 type PresenceState = { user_id: string; name: string; isTyping: boolean; online_at: string };
+type ChatNotice = { id: string; title: string; body: string };
 
 const HEART = "❤️";
 
@@ -47,6 +48,7 @@ export default function ChatRoom({ session, userAName, userBName, onPokeChannel 
   const [error, setError] = useState("");
   const [liveStatus, setLiveStatus] = useState<"connecting" | "connected" | "reconnecting">("connecting");
   const [mobileFocused, setMobileFocused] = useState(false);
+  const [notice, setNotice] = useState<ChatNotice | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const stickToBottomRef = useRef(true);
   const scrollAfterRenderRef = useRef(false);
@@ -59,8 +61,16 @@ export default function ChatRoom({ session, userAName, userBName, onPokeChannel 
   } | null>(null);
   const channelRef = useRef<RealtimeChannel | null>(null);
   const typingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastTap = useRef<{ id: string; at: number } | null>(null);
   const myName = session.user.user_metadata?.display_name || userAName;
+
+  const showNotice = useCallback((title: string, body: string) => {
+    if (noticeTimer.current) clearTimeout(noticeTimer.current);
+    setNotice({ id: `${Date.now()}-${Math.random()}`, title, body });
+    if ("vibrate" in navigator) navigator.vibrate([35, 25, 35]);
+    noticeTimer.current = setTimeout(() => setNotice(null), 5_000);
+  }, []);
 
   const refreshMessages = useCallback(async (markRead = true) => {
     const { data, error: loadError } = await supabase
@@ -139,7 +149,11 @@ export default function ChatRoom({ session, userAName, userBName, onPokeChannel 
           setMessages((current) => current.some((message) => message.id === row.id)
             ? current.map((message) => message.id === row.id ? row : message)
             : [...current, row].sort((first, second) => first.created_at.localeCompare(second.created_at)).slice(-100));
-          if (row.sender_id !== session.user.id) playSoftSound("pop");
+          if (row.sender_id !== session.user.id) {
+            playSoftSound("pop");
+            const preview = row.text?.trim() || (row.image_url ? "ส่งรูปภาพถึงคุณ 💌" : "ส่งข้อความใหม่ถึงคุณ 💌");
+            showNotice(userBName, preview.length > 90 ? `${preview.slice(0, 87)}…` : preview);
+          }
           if (row.sender_id !== session.user.id && !row.is_read) {
             void supabase.from("messages").update({ is_read: true }).eq("id", row.id).then(({ error: readError }) => {
               if (readError) {
@@ -163,6 +177,8 @@ export default function ChatRoom({ session, userAName, userBName, onPokeChannel 
       })
       .on("broadcast", { event: "poke" }, () => {
         window.dispatchEvent(new CustomEvent("couple:poke"));
+        playSoftSound("chime");
+        showNotice(userBName, "ส่งความคิดถึงมาให้คุณ ❤️");
       })
       .subscribe(async (status) => {
         if (status === "SUBSCRIBED") {
@@ -196,10 +212,11 @@ export default function ChatRoom({ session, userAName, userBName, onPokeChannel 
       window.removeEventListener("online", sync);
       window.removeEventListener("pageshow", sync);
       if (typingTimer.current) clearTimeout(typingTimer.current);
+      if (noticeTimer.current) clearTimeout(noticeTimer.current);
       onPokeChannel(null);
       void supabase.removeChannel(channel);
     };
-  }, [myName, onPokeChannel, refreshMessages, session.user.id, supabase]);
+  }, [myName, onPokeChannel, refreshMessages, session.user.id, showNotice, supabase, userAName, userBName]);
 
   useEffect(() => {
     if (!mobileFocused) return;
@@ -418,7 +435,34 @@ export default function ChatRoom({ session, userAName, userBName, onPokeChannel 
   }
 
   return (
-    <section className={`chat-room overflow-hidden rounded-[1.8rem] border border-white/80 bg-white/85 shadow-soft backdrop-blur${mobileFocused ? " chat-room-mobile-focused" : ""}`}>
+    <>
+      <AnimatePresence>
+        {notice && (
+          <motion.button
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            className="fixed left-4 right-4 top-[calc(env(safe-area-inset-top)+0.75rem)] z-[100] mx-auto flex max-w-md items-center gap-3 rounded-2xl border border-rose-100 bg-white/95 px-4 py-3 text-left shadow-[0_12px_40px_rgba(88,61,76,0.2)] backdrop-blur"
+            exit={{ opacity: 0, y: -12, scale: 0.97 }}
+            initial={{ opacity: 0, y: -12, scale: 0.97 }}
+            key={notice.id}
+            onClick={() => {
+              setNotice(null);
+              if (noticeTimer.current) clearTimeout(noticeTimer.current);
+              scrollAfterRenderRef.current = true;
+              const container = scrollContainerRef.current;
+              if (container) container.scrollTop = container.scrollHeight;
+            }}
+            type="button"
+          >
+            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-blush text-xl">💌</span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-sm font-semibold text-ink">{notice.title}</span>
+              <span className="block truncate text-xs text-ink/60">{notice.body}</span>
+            </span>
+            <span className="text-[#cf8295]">♥</span>
+          </motion.button>
+        )}
+      </AnimatePresence>
+      <section className={`chat-room overflow-hidden rounded-[1.8rem] border border-white/80 bg-white/85 shadow-soft backdrop-blur${mobileFocused ? " chat-room-mobile-focused" : ""}`}>
       <header className="flex items-center justify-between border-b border-rose-100/70 px-5 py-4 sm:px-6">
         <div className="flex items-center gap-3">
           <div className="relative grid h-11 w-11 place-items-center rounded-full bg-blush text-xl">💌
@@ -531,6 +575,7 @@ export default function ChatRoom({ session, userAName, userBName, onPokeChannel 
           {pendingMessages > 0 ? <LoaderCircle className="animate-spin" size={17} /> : <Send size={17} />}
         </button>
       </form>
-    </section>
+      </section>
+    </>
   );
 }
